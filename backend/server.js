@@ -4,7 +4,7 @@ import morgan from "morgan";
 import { users, events, registrations } from "./data/store.js";
 
 const app = express();
-const PORT = process.env.PORT || 6713;
+const PORT = process.env.PORT || 5001;
 
 // Middleware
 app.use(cors());
@@ -14,7 +14,7 @@ app.use(morgan("dev"));
 // Helper function to generate IDs
 const generateId = (prefix) => `${prefix}_${Math.random().toString(36).substr(2, 9)}`;
 
-// --- Health Check ---
+// Health check
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
