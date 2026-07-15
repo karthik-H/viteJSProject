@@ -47,7 +47,7 @@ test("Display active events on the dashboard", async ({ page }, testInfo) => {
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("heading", { name: "Registration Desk" })).toBeVisible();
     await expect(page.getByText("Select Active Event")).toBeVisible();
-    await expect(page.getByRole("option", { name: activeEvent.title })).toBeVisible();
+    await expect(page.locator("select")).toContainText(activeEvent.title);
     await expect(page.getByText("Registration Active")).toBeVisible();
     await expect(page.getByText("You can register attendees for this event.")).toBeVisible();
     await expect(page.getByText(`${activeEvent.startDate} to ${activeEvent.endDate}`)).toBeVisible();

@@ -113,7 +113,7 @@ test("Allow attendee registration on start and end boundary dates", async ({ pag
     await page.goto("/");
 
     await recorder.step("Register an attendee for the event whose start date is today");
-    await expect(page.getByText("Starts Today Conference")).toBeVisible();
+    await expect(page.locator("select")).toContainText("Starts Today Conference");
     await expect(page.getByText("Registration Active")).toBeVisible();
     await page.locator('[name="name"]').fill(startBoundaryRegistration.name);
     await page.locator('[name="email"]').fill(startBoundaryRegistration.email);
@@ -124,7 +124,7 @@ test("Allow attendee registration on start and end boundary dates", async ({ pag
 
     await recorder.step("Switch to the event whose end date is today");
     await page.selectOption("select", endBoundaryEvent.id);
-    await expect(page.getByText("Ends Today Meetup")).toBeVisible();
+    await expect(page.locator("select")).toContainText("Ends Today Meetup");
     await expect(page.getByText("Registration Active")).toBeVisible();
     await expect(page.getByText("You can register attendees for this event.")).toBeVisible();
 

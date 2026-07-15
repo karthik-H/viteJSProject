@@ -50,7 +50,7 @@ test("Prevent attendee registration after event end date", async ({ page }, test
     await recorder.step("Open dashboard and inspect event closed status");
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Registration Desk" })).toBeVisible();
-    await expect(page.getByText("Registration Closed")).toBeVisible();
+    await expect(page.getByText("Registration Closed", { exact: true })).toBeVisible();
     await expect(page.getByText(`Registration closed on ${endedEvent.endDate}.`)).toBeVisible();
 
     await recorder.step("Assert attendee registration is prevented after event end");
