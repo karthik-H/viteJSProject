@@ -1,31 +1,41 @@
 #!/usr/bin/env sh
 set -eu
+
 BASE_URL="${BASE_URL:-http://app:6713}"
-CASE_SUFFIX="$(date +%s)-$$"
-RESPONSE_FILE="/tmp/dashboard_empty_events_list_${CASE_SUFFIX}.json"
-STATUS_FILE="/tmp/dashboard_empty_events_list_${CASE_SUFFIX}.status"
+TMP_DIR="$(mktemp -d)"
+RESPONSE_HEADERS="$TMP_DIR/response_headers.txt"
+RESPONSE_BODY="$TMP_DIR/response_body.json"
+
 cleanup_files() {
-  rm -f "$RESPONSE_FILE" "$STATUS_FILE"
+  rm -rf "$TMP_DIR"
 }
 trap cleanup_files EXIT
 
 # Given
-# This service has built-in seeded in-memory events and no public reset endpoint.
-# Validate the endpoint returns a JSON array successfully.
+echo "STEP: Given — do not create any events for this isolated request"
+echo "PREREQ: no setup required"
 
 # When
-curl -sS -D - -o "$RESPONSE_FILE" -w '%{http_code}' "$BASE_URL/api/events" > "$STATUS_FILE"
+echo "STEP: When — fetch dashboard events list"
+echo "REQUEST_HEADERS: Accept: application/json"
+echo "REQUEST_BODY:"
+HTTP_CODE="$(curl -sS -D "$RESPONSE_HEADERS" -o "$RESPONSE_BODY" -w '%{http_code}' \
+  -X GET "$BASE_URL/api/events" \
+  -H 'Accept: application/json')"
+echo "RESPONSE_STATUS: $HTTP_CODE"
+echo "RESPONSE_HEADERS:"
+cat "$RESPONSE_HEADERS"
+echo "RESPONSE_BODY:"
+cat "$RESPONSE_BODY"
 
 # Then
-STATUS="$(tail -n 1 "$STATUS_FILE")"
-[ "$STATUS" = "200" ]
-grep -i '^content-type: application/json' "$STATUS_FILE" >/dev/null
-FIRST_CHAR="$(cut -c1 "$RESPONSE_FILE")"
-LAST_CHAR="$(tail -c 1 "$RESPONSE_FILE")"
-[ "$FIRST_CHAR" = "[" ]
-[ "$LAST_CHAR" = "]" ]
+echo "STEP: Then — assert response is a valid JSON array"
+[ "$HTTP_CODE" = "200" ] || { echo "ASSERTION_FAILED: expected HTTP 200 got ${HTTP_CODE}"; exit 1; }
+grep -qi 'content-type: application/json' "$RESPONSE_HEADERS" || { echo "ASSERTION_FAILED: expected JSON content type"; exit 1; }
+grep -F '[' "$RESPONSE_BODY" >/dev/null 2>&1 || { echo "ASSERTION_FAILED: expected response body to contain opening array bracket"; exit 1; }
+grep -F ']' "$RESPONSE_BODY" >/dev/null 2>&1 || { echo "ASSERTION_FAILED: expected response body to contain closing array bracket"; exit 1; }
 
 # Cleanup
-# No side effects created.
+echo "STEP: Cleanup — no cleanup required because Given was stateless"
 
 echo "CODEVALID_TEST_ASSERTION_OK:dashboard_empty_events_list"

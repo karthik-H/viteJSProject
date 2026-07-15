@@ -1,27 +1,39 @@
 #!/usr/bin/env sh
 set -eu
+
 BASE_URL="${BASE_URL:-http://app:6713}"
 CASE_SUFFIX="${CASE_SUFFIX:-$(date +%s)-$$}"
-MISSING_EVENT_ID="evt-missing-${CASE_SUFFIX}"
+EVENT_ID="evt-nonexistent-${CASE_SUFFIX}"
 TMP_DIR="$(mktemp -d)"
-RESPONSE_FILE="$TMP_DIR/response.json"
-STATUS_FILE="$TMP_DIR/status.txt"
-cleanup_files() {
+RESPONSE_HEADERS="$TMP_DIR/response_headers.txt"
+RESPONSE_BODY="$TMP_DIR/response_body.json"
+
+cleanup() {
+  echo "STEP: Cleanup — remove temporary files"
   rm -rf "$TMP_DIR"
 }
-trap cleanup_files EXIT
+trap cleanup EXIT
 
-# Given — choose a guaranteed-unique event id that has not been created
-: "${MISSING_EVENT_ID}"
+# Given
+echo "STEP: Given — prepare a non-existent event id"
+echo "PREREQ: using event id ${EVENT_ID} without creating any event"
 
-# When — request registrations for a non-existent event
-curl -sS -o "$RESPONSE_FILE" -w '%{http_code}' "$BASE_URL/api/registrations/${MISSING_EVENT_ID}" > "$STATUS_FILE"
+# When
+echo "STEP: When — request registrations for a non-existent event"
+HTTP_CODE="$(curl -sS -D "$RESPONSE_HEADERS" -o "$RESPONSE_BODY" -w '%{http_code}' \
+  "$BASE_URL/api/registrations/${EVENT_ID}")"
+echo "REQUEST_HEADERS: Accept: application/json"
+echo "REQUEST_BODY: <empty>"
+echo "RESPONSE_STATUS: $HTTP_CODE"
+echo "RESPONSE_HEADERS:"; cat "$RESPONSE_HEADERS"
+echo "RESPONSE_BODY:"; cat "$RESPONSE_BODY"
 
-# Then — expect HTTP 404 and not found message
-STATUS="$(cat "$STATUS_FILE")"
-[ "$STATUS" = "404" ]
-grep -F '"message":"Event not found."' "$RESPONSE_FILE" >/dev/null
+# Then
+echo "STEP: Then — assert HTTP 404 with not found message"
+[ "$HTTP_CODE" = "404" ] || { echo "ASSERTION_FAILED: expected HTTP 404 got ${HTTP_CODE}"; exit 1; }
+grep -F '"message":"Event not found."' "$RESPONSE_BODY" >/dev/null 2>&1 || { echo "ASSERTION_FAILED: expected Event not found message in response body"; exit 1; }
+
+# Cleanup
+echo "STEP: Cleanup — no state created"
 
 echo "CODEVALID_TEST_ASSERTION_OK:get_registrations_event_not_found"
-
-# Cleanup — stateless, nothing to clean up
