@@ -11,7 +11,7 @@ const formatDate = (date) => date.toISOString().split("T")[0];
 test("Display active events on the dashboard", async ({ page }, testInfo) => {
   const recorder = new ExecutionRecorder({
     testId: "events_dashboard_displays_active_events",
-    testTitle: "Display active events on the dashboard",
+    testName: "Display active events on the dashboard",
   });
 
   const today = new Date();
