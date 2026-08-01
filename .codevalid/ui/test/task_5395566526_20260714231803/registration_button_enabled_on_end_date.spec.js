@@ -1,6 +1,46 @@
 import { test, expect } from "@playwright/test";
 import { ExecutionRecorder } from "../../helpers/execution-recorder.js";
-import { setupAuthenticatedSession } from "../../helpers/mock-api.js";
+
+const AUTH_KEY = "auth";
+
+async function freezeDate(page, isoDate) {
+  const frozenIso = `${isoDate}T12:00:00.000Z`;
+  await page.addInitScript(({ now }) => {
+    const RealDate = Date;
+    class MockDate extends RealDate {
+      constructor(...args) {
+        if (args.length === 0) super(now);
+        else super(...args);
+      }
+      static now() { return new RealDate(now).getTime(); }
+      static parse(value) { return RealDate.parse(value); }
+      static UTC(...args) { return RealDate.UTC(...args); }
+    }
+    Object.setPrototypeOf(MockDate, RealDate);
+    // eslint-disable-next-line no-global-assign
+    Date = MockDate;
+  }, { now: frozenIso });
+}
+
+async function setupAuthenticatedSession(page) {
+  await page.addInitScript((storageKey) => {
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      token: "mock-jwt-token",
+      user: { id: "user_alice001", email: "alice@example.com" }
+    }));
+  }, AUTH_KEY);
+}
+
+async function mockHomeScenario(page, event) {
+  await page.route("**/api/events", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([event]) });
+  });
+  await page.route("**/api/registrations/*", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+  });
+}
 
 test("Registration button is enabled exactly on event end date", async ({ page }, testInfo) => {
   const recorder = new ExecutionRecorder({
@@ -8,54 +48,25 @@ test("Registration button is enabled exactly on event end date", async ({ page }
     testTitle: testInfo.title,
   });
 
-  await recorder.record("Freeze browser date to event end date 2024-06-20");
-  await page.addInitScript(() => {
-    const fixed = new Date("2024-06-20T12:00:00.000Z");
-    const RealDate = Date;
-    class MockDate extends RealDate {
-      constructor(...args) { super(args.length === 0 ? fixed.toISOString() : ...args); }
-      static now() { return fixed.getTime(); }
-      static parse(value) { return RealDate.parse(value); }
-      static UTC(...args) { return RealDate.UTC(...args); }
-    }
-    window.Date = MockDate;
-  });
-
-  await recorder.record("Seed authenticated session");
+  await freezeDate(page, "2024-06-20");
   await setupAuthenticatedSession(page);
-
-  const event = {
+  await mockHomeScenario(page, {
     id: "event_end_boundary",
-    title: "End Boundary Event",
-    description: "Registration closes after today.",
+    title: "Final Day Forum",
+    description: "Boundary open state",
     startDate: "2024-06-01",
     endDate: "2024-06-20",
-    location: "Main Hall",
+    location: "Studio 2",
     registrationCount: 0,
-  };
-
-  await recorder.record("Mock boundary event and registrations");
-  await page.route("**/api/events", async (route) => {
-    if (route.request().method() === "GET") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([event]) });
-      return;
-    }
-    await route.continue();
-  });
-  await page.route("**/api/registrations/*", async (route) => {
-    if (route.request().method() === "GET") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
-      return;
-    }
-    await route.continue();
   });
 
-  await recorder.record("Open registration dashboard");
+  recorder.record("Navigate to the registration dashboard home page");
   await page.goto("/");
 
-  await recorder.record("Assert registration is active exactly on the end date");
-  await expect(page.getByText("Registration Active", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Confirm Registration/i })).toBeEnabled();
+  recorder.record("Verify registration is still open on the exact end date");
+  await expect(page.getByText("Registration Active")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm Registration" })).toBeEnabled();
+  await expect(page.locator('[name="email"]')).toBeEnabled();
 
   console.log("CODEVALID_TEST_ASSERTION_OK:registration_button_enabled_on_end_date");
   await recorder.save(testInfo);

@@ -1,46 +1,63 @@
 import { test, expect } from "@playwright/test";
 import { ExecutionRecorder } from "../../helpers/execution-recorder.js";
-import { setupMockRoutes, teardownMockRoutes } from "../../mock/mock-server.js";
+import { setupAuthenticatedSession } from "../../helpers/mock-api.js";
 
-test.describe("Registration form is disabled before event start date", () => {
-  test.beforeEach(async ({ page }) => {
-    await setupMockRoutes(page);
+test("Registration form is disabled and shows message when current date is before event start", async ({ page }, testInfo) => {
+  const recorder = new ExecutionRecorder({
+    testId: "registration_form_disabled_before_start_date",
+    testTitle: testInfo.title,
   });
 
-  test.afterEach(async ({ page }) => {
-    await teardownMockRoutes(page);
-  });
+  const startDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const endDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
-  test("registration form disabled before start date", async ({ page }, testInfo) => {
-    const recorder = new ExecutionRecorder({
-      testId: "registration_form_disabled_before_start_date",
-      testTitle: testInfo.title,
+  const events = [
+    {
+      id: "event_future",
+      title: "Future Event",
+      description: "Event not yet open",
+      startDate,
+      endDate,
+      location: "Future Hall",
+      registrationCount: 0,
+    },
+  ];
+
+  await recorder.record("Seed authenticated session");
+  await setupAuthenticatedSession(page);
+
+  await recorder.record("Mock future event and empty registrations");
+  await page.route("**/api/events", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(events),
     });
-
-    recorder.record("Navigate to home page");
-    await page.goto("/");
-
-    recorder.record("Select future event");
-    const eventSelector = page.locator("select");
-    await expect(eventSelector).toBeVisible();
-    await eventSelector.selectOption("event_workshop2026");
-
-    recorder.record("Verify status badge and upcoming registration message");
-    await expect(page.getByText("Registration Upcoming")).toBeVisible();
-    await expect(page.getByText(/Registration opens on .*\./)).toBeVisible();
-
-    recorder.record("Verify all form controls are disabled");
-    const nameInput = page.locator('[name="name"]');
-    const emailInput = page.locator('[name="email"]');
-    const phoneInput = page.locator('[name="phone"]');
-    const submitButton = page.getByRole("button", { name: /Confirm Registration/i });
-
-    await expect(nameInput).toBeDisabled();
-    await expect(emailInput).toBeDisabled();
-    await expect(phoneInput).toBeDisabled();
-    await expect(submitButton).toBeDisabled();
-
-    console.log("CODEVALID_TEST_ASSERTION_OK:registration_form_disabled_before_start_date");
-    await recorder.save(testInfo);
   });
+
+  await page.route("**/api/registrations/*", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([]),
+    });
+  });
+
+  await recorder.record("Open Home page");
+  await page.goto("/");
+
+  await recorder.record("Assert future registration status and message are shown");
+  await expect(page.getByText("Registration Upcoming")).toBeVisible();
+  await expect(page.getByText(`Registration opens on ${startDate}.`)).toBeVisible();
+
+  await recorder.record("Assert form fields and submit button are disabled");
+  await expect(page.locator('[name="name"]')).toBeDisabled();
+  await expect(page.locator('[name="email"]')).toBeDisabled();
+  await expect(page.locator('[name="phone"]')).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Confirm Registration" })).toBeDisabled();
+
+  console.log("CODEVALID_TEST_ASSERTION_OK:registration_form_disabled_before_start_date");
+  await recorder.save(testInfo);
 });

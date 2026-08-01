@@ -6,17 +6,18 @@ EVENT_TITLE="Minimal Event ${CASE_SUFFIX}"
 EVENT_START_DATE="2025-07-01"
 EVENT_END_DATE="2025-07-02"
 EVENT_LOCATION="Outdoor Park"
-REQUEST_BODY_FILE="/tmp/optional_description_handled_correctly_body_${CASE_SUFFIX}.json"
-RESPONSE_BODY_FILE="/tmp/optional_description_handled_correctly_response_${CASE_SUFFIX}.json"
-RESPONSE_HEADERS_FILE="/tmp/optional_description_handled_correctly_headers_${CASE_SUFFIX}.txt"
+CREATE_BODY_FILE="/tmp/optional_description_handled_correctly_body_${CASE_SUFFIX}.json"
+CREATE_RESPONSE_BODY="/tmp/optional_description_handled_correctly_response_${CASE_SUFFIX}.json"
+CREATE_RESPONSE_HEADERS="/tmp/optional_description_handled_correctly_headers_${CASE_SUFFIX}.txt"
 cleanup_files() {
-  rm -f "$REQUEST_BODY_FILE" "$RESPONSE_BODY_FILE" "$RESPONSE_HEADERS_FILE"
+  rm -f "$CREATE_BODY_FILE" "$CREATE_RESPONSE_BODY" "$CREATE_RESPONSE_HEADERS"
 }
 trap cleanup_files EXIT
 
 # Given
-echo "STEP: Given — prepare an event creation payload without a description field"
-cat > "$REQUEST_BODY_FILE" <<EOF
+echo "STEP: Given — prepare event payload without description"
+echo "PREREQ: unique event title prepared while omitting optional description"
+cat > "$CREATE_BODY_FILE" <<EOF
 {
   "title": "$EVENT_TITLE",
   "startDate": "$EVENT_START_DATE",
@@ -24,32 +25,35 @@ cat > "$REQUEST_BODY_FILE" <<EOF
   "location": "$EVENT_LOCATION"
 }
 EOF
-echo "PREREQ: payload omits description to verify the API defaults it to an empty string"
 
 # When
-echo "STEP: When — create an event without description"
+echo "STEP: When — create event without the optional description field"
 echo 'REQUEST_HEADERS: Content-Type: application/json'
 echo 'REQUEST_BODY:'
-cat "$REQUEST_BODY_FILE"
-status_code="$(curl -sS -o "$RESPONSE_BODY_FILE" -D "$RESPONSE_HEADERS_FILE" -w '%{http_code}' -X POST "$BASE_URL/api/events" -H 'Content-Type: application/json' --data @"$REQUEST_BODY_FILE")"
-echo "RESPONSE_STATUS: $status_code"
+cat "$CREATE_BODY_FILE"
+http_code="$(curl -sS -o "$CREATE_RESPONSE_BODY" -D "$CREATE_RESPONSE_HEADERS" -w '%{http_code}' -X POST "$BASE_URL/api/events" -H 'Content-Type: application/json' --data @"$CREATE_BODY_FILE")"
+echo "RESPONSE_STATUS: $http_code"
 echo 'RESPONSE_HEADERS:'
-cat "$RESPONSE_HEADERS_FILE"
+cat "$CREATE_RESPONSE_HEADERS"
 echo 'RESPONSE_BODY:'
-cat "$RESPONSE_BODY_FILE"
+cat "$CREATE_RESPONSE_BODY"
 
 # Then
-echo "STEP: Then — assert the response sets description to an empty string and registrationCount to zero"
-[ "$status_code" = "201" ] || { echo "ASSERTION_FAILED: expected HTTP 201 got ${status_code}"; exit 1; }
-response_description="$(jq -r '.description' "$RESPONSE_BODY_FILE")"
-[ "$response_description" = "" ] || { echo "ASSERTION_FAILED: expected empty description got ${response_description}"; exit 1; }
-response_registration_count="$(jq -r '.registrationCount' "$RESPONSE_BODY_FILE")"
-[ "$response_registration_count" = "0" ] || { echo "ASSERTION_FAILED: expected registrationCount 0 got ${response_registration_count}"; exit 1; }
-response_title="$(jq -r '.title' "$RESPONSE_BODY_FILE")"
-[ "$response_title" = "$EVENT_TITLE" ] || { echo "ASSERTION_FAILED: expected response title ${EVENT_TITLE} got ${response_title}"; exit 1; }
+echo "STEP: Then — assert HTTP 201 and description defaults to empty string"
+[ "$http_code" = "201" ] || { echo "ASSERTION_FAILED: expected HTTP 201 got ${http_code}"; exit 1; }
+returned_title="$(jq -r '.title' "$CREATE_RESPONSE_BODY")"
+[ "$returned_title" = "$EVENT_TITLE" ] || { echo "ASSERTION_FAILED: expected title ${EVENT_TITLE} got ${returned_title}"; exit 1; }
+returned_description="$(jq -r '.description' "$CREATE_RESPONSE_BODY")"
+[ "$returned_description" = "" ] || { echo "ASSERTION_FAILED: expected empty description got ${returned_description}"; exit 1; }
+returned_registration_count="$(jq -r '.registrationCount' "$CREATE_RESPONSE_BODY")"
+[ "$returned_registration_count" = "0" ] || { echo "ASSERTION_FAILED: expected registrationCount 0 got ${returned_registration_count}"; exit 1; }
+returned_start_date="$(jq -r '.startDate' "$CREATE_RESPONSE_BODY")"
+[ "$returned_start_date" = "$EVENT_START_DATE" ] || { echo "ASSERTION_FAILED: expected startDate ${EVENT_START_DATE} got ${returned_start_date}"; exit 1; }
+returned_end_date="$(jq -r '.endDate' "$CREATE_RESPONSE_BODY")"
+[ "$returned_end_date" = "$EVENT_END_DATE" ] || { echo "ASSERTION_FAILED: expected endDate ${EVENT_END_DATE} got ${returned_end_date}"; exit 1; }
 
 # Cleanup
-echo "STEP: Cleanup — remove temporary files for the self-contained event creation test"
+echo "STEP: Cleanup — remove temporary files created by the test"
 cleanup_files
 
 echo "CODEVALID_TEST_ASSERTION_OK:optional_description_handled_correctly"

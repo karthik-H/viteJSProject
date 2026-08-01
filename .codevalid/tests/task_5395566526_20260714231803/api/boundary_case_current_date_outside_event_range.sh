@@ -2,24 +2,32 @@
 set -eu
 BASE_URL="${BASE_URL:-http://app:6713}"
 CASE_SUFFIX="$(date +%s)_$$"
+TODAY_EPOCH="$(date -u +%s)"
+TOMORROW_UTC="$(date -u -d "@$(($TODAY_EPOCH + 86400))" +%Y-%m-%d 2>/dev/null || date -u -r $(($TODAY_EPOCH + 86400)) +%Y-%m-%d)"
+DAY_AFTER_TOMORROW_UTC="$(date -u -d "@$(($TODAY_EPOCH + 172800))" +%Y-%m-%d 2>/dev/null || date -u -r $(($TODAY_EPOCH + 172800)) +%Y-%m-%d)"
 EVENT_TITLE="Late Autumn Workshop ${CASE_SUFFIX}"
 EVENT_DESCRIPTION="Workshop after summer"
-EVENT_START_DATE="2025-10-15"
-EVENT_END_DATE="2025-10-18"
+EVENT_START_DATE="$TOMORROW_UTC"
+EVENT_END_DATE="$DAY_AFTER_TOMORROW_UTC"
 EVENT_LOCATION="Community Hall"
+ATTENDEE_NAME="Outside Range Attendee ${CASE_SUFFIX}"
+ATTENDEE_EMAIL="outside-range-${CASE_SUFFIX}@example.com"
+ATTENDEE_PHONE="555020${CASE_SUFFIX#*_}"
 CREATE_BODY_FILE="/tmp/boundary_case_current_date_outside_event_range_create_body_${CASE_SUFFIX}.json"
 CREATE_RESPONSE_BODY="/tmp/boundary_case_current_date_outside_event_range_create_response_${CASE_SUFFIX}.json"
 CREATE_RESPONSE_HEADERS="/tmp/boundary_case_current_date_outside_event_range_create_headers_${CASE_SUFFIX}.txt"
-LIST_RESPONSE_BODY="/tmp/boundary_case_current_date_outside_event_range_list_response_${CASE_SUFFIX}.json"
-LIST_RESPONSE_HEADERS="/tmp/boundary_case_current_date_outside_event_range_list_headers_${CASE_SUFFIX}.txt"
-CREATED_EVENT_ID=""
+REGISTER_BODY_FILE="/tmp/boundary_case_current_date_outside_event_range_register_body_${CASE_SUFFIX}.json"
+REGISTER_RESPONSE_BODY="/tmp/boundary_case_current_date_outside_event_range_register_response_${CASE_SUFFIX}.json"
+REGISTER_RESPONSE_HEADERS="/tmp/boundary_case_current_date_outside_event_range_register_headers_${CASE_SUFFIX}.txt"
+EVENT_ID=""
 cleanup_files() {
-  rm -f "$CREATE_BODY_FILE" "$CREATE_RESPONSE_BODY" "$CREATE_RESPONSE_HEADERS" "$LIST_RESPONSE_BODY" "$LIST_RESPONSE_HEADERS"
+  rm -f "$CREATE_BODY_FILE" "$CREATE_RESPONSE_BODY" "$CREATE_RESPONSE_HEADERS" "$REGISTER_BODY_FILE" "$REGISTER_RESPONSE_BODY" "$REGISTER_RESPONSE_HEADERS"
 }
 trap cleanup_files EXIT
 
 # Given
-echo "STEP: Given — prepare an event payload whose date range would block registration when current date is before the start"
+echo "STEP: Given — create an event whose registration window starts in the future"
+echo "PREREQ: using tomorrow and the following day so current date is outside the event range"
 cat > "$CREATE_BODY_FILE" <<EOF
 {
   "title": "$EVENT_TITLE",
@@ -29,10 +37,6 @@ cat > "$CREATE_BODY_FILE" <<EOF
   "location": "$EVENT_LOCATION"
 }
 EOF
-echo "PREREQ: future event window prepared so later registration logic can reject out-of-range attempts"
-
-# When
-echo "STEP: When — create the future-dated event"
 echo 'REQUEST_HEADERS: Content-Type: application/json'
 echo 'REQUEST_BODY:'
 cat "$CREATE_BODY_FILE"
@@ -42,31 +46,40 @@ echo 'RESPONSE_HEADERS:'
 cat "$CREATE_RESPONSE_HEADERS"
 echo 'RESPONSE_BODY:'
 cat "$CREATE_RESPONSE_BODY"
-CREATED_EVENT_ID="$(jq -r '.id // empty' "$CREATE_RESPONSE_BODY")"
+[ "$create_status" = "201" ] || { echo "ASSERTION_FAILED: expected HTTP 201 creating event got ${create_status}"; exit 1; }
+EVENT_ID="$(jq -r '.id // empty' "$CREATE_RESPONSE_BODY")"
+[ -n "$EVENT_ID" ] || { echo "ASSERTION_FAILED: expected event id after creation"; exit 1; }
+
+# When
+echo "STEP: When — attempt attendee registration before the event start date"
+echo "PREREQ: building registration request body for the created event"
+cat > "$REGISTER_BODY_FILE" <<EOF
+{
+  "eventId": "$EVENT_ID",
+  "name": "$ATTENDEE_NAME",
+  "email": "$ATTENDEE_EMAIL",
+  "phone": "$ATTENDEE_PHONE"
+}
+EOF
+echo 'REQUEST_HEADERS: Content-Type: application/json'
+echo 'REQUEST_BODY:'
+cat "$REGISTER_BODY_FILE"
+register_status="$(curl -sS -o "$REGISTER_RESPONSE_BODY" -D "$REGISTER_RESPONSE_HEADERS" -w '%{http_code}' -X POST "$BASE_URL/api/registrations" -H 'Content-Type: application/json' --data @"$REGISTER_BODY_FILE")"
+echo "RESPONSE_STATUS: $register_status"
+echo 'RESPONSE_HEADERS:'
+cat "$REGISTER_RESPONSE_HEADERS"
+echo 'RESPONSE_BODY:'
+cat "$REGISTER_RESPONSE_BODY"
 
 # Then
-echo "STEP: Then — assert the event is created with the expected future date range and appears in the dashboard list"
-[ "$create_status" = "201" ] || { echo "ASSERTION_FAILED: expected HTTP 201 got ${create_status}"; exit 1; }
-[ -n "$CREATED_EVENT_ID" ] || { echo "ASSERTION_FAILED: expected created event id for outside-range event"; exit 1; }
-response_start_date="$(jq -r '.startDate' "$CREATE_RESPONSE_BODY")"
-[ "$response_start_date" = "$EVENT_START_DATE" ] || { echo "ASSERTION_FAILED: expected startDate ${EVENT_START_DATE} got ${response_start_date}"; exit 1; }
-response_end_date="$(jq -r '.endDate' "$CREATE_RESPONSE_BODY")"
-[ "$response_end_date" = "$EVENT_END_DATE" ] || { echo "ASSERTION_FAILED: expected endDate ${EVENT_END_DATE} got ${response_end_date}"; exit 1; }
-
-echo "STEP: Then — verify the created future-dated event appears in the dashboard events API"
-echo 'REQUEST_HEADERS: Accept: application/json'
-echo 'REQUEST_BODY: <empty>'
-list_status="$(curl -sS -o "$LIST_RESPONSE_BODY" -D "$LIST_RESPONSE_HEADERS" -w '%{http_code}' "$BASE_URL/api/events")"
-echo "RESPONSE_STATUS: $list_status"
-echo 'RESPONSE_HEADERS:'
-cat "$LIST_RESPONSE_HEADERS"
-echo 'RESPONSE_BODY:'
-cat "$LIST_RESPONSE_BODY"
-[ "$list_status" = "200" ] || { echo "ASSERTION_FAILED: expected HTTP 200 from events list got ${list_status}"; exit 1; }
-jq -e --arg id "$CREATED_EVENT_ID" --arg startDate "$EVENT_START_DATE" --arg endDate "$EVENT_END_DATE" '.[] | select(.id == $id and .startDate == $startDate and .endDate == $endDate)' "$LIST_RESPONSE_BODY" >/dev/null || { echo "ASSERTION_FAILED: expected created future-dated event to appear in GET /api/events"; exit 1; }
+echo "STEP: Then — assert registration is blocked because current date is outside the event range"
+[ "$register_status" = "400" ] || { echo "ASSERTION_FAILED: expected HTTP 400 got ${register_status}"; exit 1; }
+expected_message="Registration has not opened yet. Registration opens on ${EVENT_START_DATE}."
+actual_message="$(jq -r '.message' "$REGISTER_RESPONSE_BODY")"
+[ "$actual_message" = "$expected_message" ] || { echo "ASSERTION_FAILED: expected message ${expected_message} got ${actual_message}"; exit 1; }
 
 # Cleanup
-echo "STEP: Cleanup — remove temporary files for the self-contained dashboard creation test"
+echo "STEP: Cleanup — remove temporary files created by the test"
 cleanup_files
 
 echo "CODEVALID_TEST_ASSERTION_OK:boundary_case_current_date_outside_event_range"

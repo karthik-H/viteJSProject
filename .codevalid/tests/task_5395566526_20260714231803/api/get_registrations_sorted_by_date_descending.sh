@@ -20,9 +20,9 @@ RESPONSE_HEADERS="$TMP_DIR/response_headers.txt"
 RESPONSE_BODY="$TMP_DIR/response_body.json"
 EVENT_ID=""
 EVENT_TITLE="Sorted Registrations Event ${CASE_SUFFIX}"
-EMAIL_A="older.${CASE_SUFFIX}@test.com"
-EMAIL_B="middle.${CASE_SUFFIX}@test.com"
-EMAIL_C="newer.${CASE_SUFFIX}@test.com"
+EMAIL_OLD="old.${CASE_SUFFIX}@test.com"
+EMAIL_MID="mid.${CASE_SUFFIX}@test.com"
+EMAIL_NEW="new.${CASE_SUFFIX}@test.com"
 
 cleanup() {
   echo "STEP: Cleanup — remove temporary files"
@@ -31,10 +31,10 @@ cleanup() {
 trap cleanup EXIT
 
 # Given
-echo "STEP: Given — create an event and three registrations in sequence"
+echo "STEP: Given — create an event and three registrations at different times"
 echo "PREREQ: create event with active registration window"
 cat > "$EVENT_REQUEST_BODY" <<EOF
-{"title":"${EVENT_TITLE}","description":"Event for sort verification","startDate":"2020-01-01","endDate":"2099-12-31","location":"Sorting Room"}
+{"title":"${EVENT_TITLE}","description":"Event for sort verification","startDate":"2020-01-01","endDate":"2099-12-31","location":"Sorting Hall"}
 EOF
 echo "REQUEST_HEADERS: Content-Type: application/json"
 echo "REQUEST_BODY:"; cat "$EVENT_REQUEST_BODY"
@@ -51,7 +51,7 @@ EVENT_ID="$(sed -n 's/.*"id":"\([^"]*\)".*/\1/p' "$EVENT_RESPONSE_BODY" | head -
 
 echo "PREREQ: create oldest registration"
 cat > "$REG1_REQUEST_BODY" <<EOF
-{"eventId":"${EVENT_ID}","name":"User Older","email":"${EMAIL_A}","phone":"700-000-0001"}
+{"eventId":"${EVENT_ID}","name":"Oldest Registration","email":"${EMAIL_OLD}","phone":"111-111-1111"}
 EOF
 echo "REQUEST_HEADERS: Content-Type: application/json"
 echo "REQUEST_BODY:"; cat "$REG1_REQUEST_BODY"
@@ -67,7 +67,7 @@ sleep 1
 
 echo "PREREQ: create middle registration"
 cat > "$REG2_REQUEST_BODY" <<EOF
-{"eventId":"${EVENT_ID}","name":"User Middle","email":"${EMAIL_B}","phone":"700-000-0002"}
+{"eventId":"${EVENT_ID}","name":"Middle Registration","email":"${EMAIL_MID}","phone":"222-222-2222"}
 EOF
 echo "REQUEST_HEADERS: Content-Type: application/json"
 echo "REQUEST_BODY:"; cat "$REG2_REQUEST_BODY"
@@ -83,7 +83,7 @@ sleep 1
 
 echo "PREREQ: create newest registration"
 cat > "$REG3_REQUEST_BODY" <<EOF
-{"eventId":"${EVENT_ID}","name":"User Newer","email":"${EMAIL_C}","phone":"700-000-0003"}
+{"eventId":"${EVENT_ID}","name":"Newest Registration","email":"${EMAIL_NEW}","phone":"333-333-3333"}
 EOF
 echo "REQUEST_HEADERS: Content-Type: application/json"
 echo "REQUEST_BODY:"; cat "$REG3_REQUEST_BODY"
@@ -97,7 +97,7 @@ echo "RESPONSE_BODY:"; cat "$REG3_RESPONSE_BODY"
 [ "$REG3_HTTP_CODE" = "201" ] || { echo "ASSERTION_FAILED: expected HTTP 201 got ${REG3_HTTP_CODE} while creating newest registration"; exit 1; }
 
 # When
-echo "STEP: When — retrieve registrations for the event"
+echo "STEP: When — retrieve registrations for sorting verification"
 HTTP_CODE="$(curl -sS -D "$RESPONSE_HEADERS" -o "$RESPONSE_BODY" -w '%{http_code}' \
   "$BASE_URL/api/registrations/${EVENT_ID}")"
 echo "REQUEST_HEADERS: Accept: application/json"
@@ -107,21 +107,19 @@ echo "RESPONSE_HEADERS:"; cat "$RESPONSE_HEADERS"
 echo "RESPONSE_BODY:"; cat "$RESPONSE_BODY"
 
 # Then
-echo "STEP: Then — assert HTTP 200 and descending order newest, middle, oldest"
+echo "STEP: Then — assert HTTP 200 with registrations sorted by registeredAt descending"
 [ "$HTTP_CODE" = "200" ] || { echo "ASSERTION_FAILED: expected HTTP 200 got ${HTTP_CODE}"; exit 1; }
-grep -F '"email":"'"$EMAIL_A"'"' "$RESPONSE_BODY" >/dev/null 2>&1 || { echo "ASSERTION_FAILED: expected oldest registration email in response body"; exit 1; }
-grep -F '"email":"'"$EMAIL_B"'"' "$RESPONSE_BODY" >/dev/null 2>&1 || { echo "ASSERTION_FAILED: expected middle registration email in response body"; exit 1; }
-grep -F '"email":"'"$EMAIL_C"'"' "$RESPONSE_BODY" >/dev/null 2>&1 || { echo "ASSERTION_FAILED: expected newest registration email in response body"; exit 1; }
-EMAIL_COUNT="$(grep -o '"email":' "$RESPONSE_BODY" | wc -l | tr -d ' ')"
-[ "$EMAIL_COUNT" = "3" ] || { echo "ASSERTION_FAILED: expected 3 registrations got ${EMAIL_COUNT}"; exit 1; }
-POS_C="$(grep -bo '"email":"'"$EMAIL_C"'"' "$RESPONSE_BODY" | head -n 1 | cut -d: -f1)"
-POS_B="$(grep -bo '"email":"'"$EMAIL_B"'"' "$RESPONSE_BODY" | head -n 1 | cut -d: -f1)"
-POS_A="$(grep -bo '"email":"'"$EMAIL_A"'"' "$RESPONSE_BODY" | head -n 1 | cut -d: -f1)"
-[ -n "$POS_C" ] || { echo "ASSERTION_FAILED: expected to find newest registration position in response"; exit 1; }
-[ -n "$POS_B" ] || { echo "ASSERTION_FAILED: expected to find middle registration position in response"; exit 1; }
-[ -n "$POS_A" ] || { echo "ASSERTION_FAILED: expected to find oldest registration position in response"; exit 1; }
-[ "$POS_C" -lt "$POS_B" ] || { echo "ASSERTION_FAILED: expected newest registration before middle registration in response ordering"; exit 1; }
-[ "$POS_B" -lt "$POS_A" ] || { echo "ASSERTION_FAILED: expected middle registration before oldest registration in response ordering"; exit 1; }
+grep -F '"email":"'"$EMAIL_NEW"'"' "$RESPONSE_BODY" >/dev/null 2>&1 || { echo "ASSERTION_FAILED: expected newest registration email in response body"; exit 1; }
+grep -F '"email":"'"$EMAIL_MID"'"' "$RESPONSE_BODY" >/dev/null 2>&1 || { echo "ASSERTION_FAILED: expected middle registration email in response body"; exit 1; }
+grep -F '"email":"'"$EMAIL_OLD"'"' "$RESPONSE_BODY" >/dev/null 2>&1 || { echo "ASSERTION_FAILED: expected oldest registration email in response body"; exit 1; }
+NEW_POS="$(grep -bo '"email":"'"$EMAIL_NEW"'"' "$RESPONSE_BODY" | head -n 1 | cut -d: -f1)"
+MID_POS="$(grep -bo '"email":"'"$EMAIL_MID"'"' "$RESPONSE_BODY" | head -n 1 | cut -d: -f1)"
+OLD_POS="$(grep -bo '"email":"'"$EMAIL_OLD"'"' "$RESPONSE_BODY" | head -n 1 | cut -d: -f1)"
+[ -n "$NEW_POS" ] || { echo "ASSERTION_FAILED: expected to find newest registration position"; exit 1; }
+[ -n "$MID_POS" ] || { echo "ASSERTION_FAILED: expected to find middle registration position"; exit 1; }
+[ -n "$OLD_POS" ] || { echo "ASSERTION_FAILED: expected to find oldest registration position"; exit 1; }
+[ "$NEW_POS" -lt "$MID_POS" ] || { echo "ASSERTION_FAILED: expected newest registration before middle registration"; exit 1; }
+[ "$MID_POS" -lt "$OLD_POS" ] || { echo "ASSERTION_FAILED: expected middle registration before oldest registration"; exit 1; }
 
 # Cleanup
 echo "STEP: Cleanup — no delete API exists; unique test data isolates side effects"

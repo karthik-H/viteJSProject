@@ -1,85 +1,94 @@
 import { test, expect } from "@playwright/test";
 import { ExecutionRecorder } from "../../helpers/execution-recorder.js";
-import { setupMockRoutes, teardownMockRoutes } from "../../mock/mock-server.js";
+import { setupAuthenticatedSession } from "../../helpers/mock-api.js";
 
-test.describe("Successful registration updates count and clears form", () => {
-  test.beforeEach(async ({ page }) => {
-    await setupMockRoutes(page);
-    await page.route("**/api/events", async (route) => {
-      const request = route.request();
-      if (request.method() !== "GET") {
-        return route.fallback();
-      }
+test("Successful registration updates registration count and form state", async ({ page }, testInfo) => {
+  const recorder = new ExecutionRecorder({
+    testId: "successful_registration_and_ui_update",
+    testTitle: testInfo.title,
+  });
 
-      return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([
-          {
-            id: "event_open_zero_001",
-            title: "Open Registration Expo",
-            description: "Open event with no current registrations.",
-            startDate: "2024-01-01",
-            endDate: "2099-12-31",
-            location: "Expo Center",
-            registrationCount: 0,
-          },
-        ]),
-      });
-    });
+  const startDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const endDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
-    await page.route("**/api/registrations/event_open_zero_001", async (route) => {
-      if (route.request().method() !== "GET") {
-        return route.fallback();
-      }
+  const events = [
+    {
+      id: "event_success",
+      title: "Success Event",
+      description: "Open event",
+      startDate,
+      endDate,
+      location: "Hall 1",
+      registrationCount: 0,
+    },
+  ];
 
-      return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([]),
-      });
+  const createdRegistration = {
+    id: "reg_created_001",
+    eventId: "event_success",
+    name: "Jane Smith",
+    email: "jane@smith.com",
+    phone: "+1 (555) 000-0000",
+    registeredAt: new Date().toISOString(),
+  };
+
+  await recorder.record("Seed authenticated session");
+  await setupAuthenticatedSession(page);
+
+  await recorder.record("Mock open event and empty registrations");
+  await page.route("**/api/events", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(events),
     });
   });
 
-  test.afterEach(async ({ page }) => {
-    await teardownMockRoutes(page);
-  });
-
-  test("successful registration and ui update", async ({ page }, testInfo) => {
-    const recorder = new ExecutionRecorder({
-      testId: "successful_registration_and_ui_update",
-      testTitle: testInfo.title,
+  await page.route("**/api/registrations/*", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([]),
     });
-
-    recorder.record("Navigate to home page with open event and zero registrations");
-    await page.goto("/");
-
-    recorder.record("Verify initial zero registration state");
-    await expect(page.getByText("0 Total")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "No Registered Attendees" })).toBeVisible();
-
-    const nameInput = page.locator('[name="name"]');
-    const emailInput = page.locator('[name="email"]');
-    const phoneInput = page.locator('[name="phone"]');
-    const submitButton = page.getByRole("button", { name: /Confirm Registration/i });
-
-    recorder.record("Fill registration form");
-    await nameInput.fill("New Attendee");
-    await emailInput.fill("new.attendee@example.com");
-    await phoneInput.fill("+1 (555) 300-0001");
-
-    recorder.record("Submit registration");
-    await submitButton.click();
-
-    recorder.record("Verify success state, updated count, and cleared form");
-    await expect(page.getByText("Attendee registered successfully!")).toBeVisible();
-    await expect(page.getByText("1 Total")).toBeVisible();
-    await expect(page.getByText("New Attendee")).toBeVisible();
-    await expect(nameInput).toHaveValue("");
-    await expect(emailInput).toHaveValue("");
-    await expect(phoneInput).toHaveValue("");
-
-    console.log("CODEVALID_TEST_ASSERTION_OK:successful_registration_and_ui_update");
-    await recorder.save(testInfo);
   });
+
+  await recorder.record("Mock successful POST /api/registrations response");
+  await page.route("**/api/registrations", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    const payload = JSON.parse(route.request().postData() || "{}");
+    expect(payload).toEqual({
+      eventId: "event_success",
+      name: "Jane Smith",
+      email: "jane@smith.com",
+      phone: "+1 (555) 000-0000",
+    });
+    await route.fulfill({
+      status: 201,
+      contentType: "application/json",
+      body: JSON.stringify(createdRegistration),
+    });
+  });
+
+  await recorder.record("Open Home page");
+  await page.goto("/");
+
+  await recorder.record("Fill registration form and submit");
+  await page.locator('[name="name"]').fill("Jane Smith");
+  await page.locator('[name="email"]').fill("jane@smith.com");
+  await page.locator('[name="phone"]').fill("+1 (555) 000-0000");
+  await page.getByRole("button", { name: "Confirm Registration" }).click();
+
+  await recorder.record("Assert success feedback, incremented count, and cleared form fields");
+  await expect(page.getByText("Attendee registered successfully!")).toBeVisible();
+  await expect(page.getByText("1 Total")).toBeVisible();
+  await expect(page.getByText("Jane Smith")).toBeVisible();
+  await expect(page.getByText("jane@smith.com")).toBeVisible();
+  await expect(page.locator('[name="name"]')).toHaveValue("");
+  await expect(page.locator('[name="email"]')).toHaveValue("");
+  await expect(page.locator('[name="phone"]')).toHaveValue("");
+
+  console.log("CODEVALID_TEST_ASSERTION_OK:successful_registration_and_ui_update");
+  await recorder.save(testInfo);
 });

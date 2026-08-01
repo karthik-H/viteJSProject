@@ -1,84 +1,83 @@
 import { test, expect } from "@playwright/test";
 import { ExecutionRecorder } from "../../helpers/execution-recorder.js";
-import { setupMockRoutes, teardownMockRoutes } from "../../mock/mock-server.js";
+import { setupAuthenticatedSession } from "../../helpers/mock-api.js";
 
-test.describe("Backend date-related error is shown to user", () => {
-  test.beforeEach(async ({ page }) => {
-    await setupMockRoutes(page);
-    await page.route("**/api/events", async (route) => {
-      const request = route.request();
-      if (request.method() !== "GET") {
-        return route.fallback();
-      }
+test("Backend error messages are shown to user on registration failure", async ({ page }, testInfo) => {
+  const recorder = new ExecutionRecorder({
+    testId: "registration_error_displayed_for_backend_failure",
+    testTitle: testInfo.title,
+  });
 
-      return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([
-          {
-            id: "event_future_force_submit_001",
-            title: "Future Launch Event",
-            description: "Future event for backend error display validation.",
-            startDate: "2099-01-15",
-            endDate: "2099-01-20",
-            location: "Virtual",
-            registrationCount: 0,
-          },
-        ]),
-      });
-    });
+  const startDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const endDate = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
 
-    await page.route("**/api/registrations/event_future_force_submit_001", async (route) => {
-      if (route.request().method() !== "GET") {
-        return route.fallback();
-      }
+  const events = [
+    {
+      id: "event_backend_future",
+      title: "Backend Future Event",
+      description: "Event scheduled later",
+      startDate,
+      endDate,
+      location: "Hall 4",
+      registrationCount: 0,
+    },
+  ];
 
-      return route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify([]),
-      });
+  const backendMessage = `Registration has not opened yet. Registration opens on ${startDate}.`;
+
+  await recorder.record("Seed authenticated session");
+  await setupAuthenticatedSession(page);
+
+  await recorder.record("Mock future event and empty registrations");
+  await page.route("**/api/events", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(events),
     });
   });
 
-  test.afterEach(async ({ page }) => {
-    await teardownMockRoutes(page);
-  });
-
-  test("registration error displayed for backend failure", async ({ page }, testInfo) => {
-    const recorder = new ExecutionRecorder({
-      testId: "registration_error_displayed_for_backend_failure",
-      testTitle: testInfo.title,
+  await page.route("**/api/registrations/*", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([]),
     });
-
-    recorder.record("Navigate to home page with future event");
-    await page.goto("/");
-
-    recorder.record("Confirm upcoming registration status is visible");
-    await expect(page.getByText("Registration Upcoming")).toBeVisible();
-    await expect(page.getByText("Registration opens on 2099-01-15.")).toBeVisible();
-
-    const nameInput = page.locator('[name="name"]');
-    const emailInput = page.locator('[name="email"]');
-    const phoneInput = page.locator('[name="phone"]');
-    const submitButton = page.getByRole("button", { name: /Confirm Registration/i });
-
-    recorder.record("Force enable disabled form controls to simulate backend error rendering path");
-    await nameInput.evaluate((el) => el.removeAttribute("disabled"));
-    await emailInput.evaluate((el) => el.removeAttribute("disabled"));
-    await phoneInput.evaluate((el) => el.removeAttribute("disabled"));
-    await submitButton.evaluate((el) => el.removeAttribute("disabled"));
-
-    recorder.record("Fill form and submit future event registration");
-    await nameInput.fill("Future User");
-    await emailInput.fill("future.user@example.com");
-    await phoneInput.fill("+1 (555) 600-7000");
-    await submitButton.click();
-
-    recorder.record("Verify exact backend date-window error message is displayed");
-    await expect(page.getByText("Registration has not opened yet. Registration opens on 2099-01-15.")).toBeVisible();
-
-    console.log("CODEVALID_TEST_ASSERTION_OK:registration_error_displayed_for_backend_failure");
-    await recorder.save(testInfo);
   });
+
+  await recorder.record("Override disabled form in DOM and mock backend 400 response");
+  await page.route("**/api/registrations", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({ message: backendMessage }),
+    });
+  });
+
+  await recorder.record("Open Home page");
+  await page.goto("/");
+
+  await recorder.record("Confirm future registration message is visible");
+  await expect(page.getByText("Registration Upcoming")).toBeVisible();
+  await expect(page.getByText(`Registration opens on ${startDate}.`)).toBeVisible();
+
+  await recorder.record("Force-enable the disabled inputs and submit button to exercise backend error rendering path");
+  await page.locator('[name="name"]').evaluate((el) => el.removeAttribute("disabled"));
+  await page.locator('[name="email"]').evaluate((el) => el.removeAttribute("disabled"));
+  await page.locator('[name="phone"]').evaluate((el) => el.removeAttribute("disabled"));
+  await page.getByRole("button", { name: "Confirm Registration" }).evaluate((el) => el.removeAttribute("disabled"));
+
+  await page.locator('[name="name"]').fill("Future User");
+  await page.locator('[name="email"]').fill("future@example.com");
+  await page.locator('[name="phone"]').fill("+1 (555) 000-3333");
+  await page.getByRole("button", { name: "Confirm Registration" }).click();
+
+  await recorder.record("Assert backend message is displayed exactly to the user");
+  await expect(page.getByText(backendMessage)).toBeVisible();
+
+  console.log("CODEVALID_TEST_ASSERTION_OK:registration_error_displayed_for_backend_failure");
+  await recorder.save(testInfo);
 });

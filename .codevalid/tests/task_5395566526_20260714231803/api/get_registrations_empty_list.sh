@@ -20,9 +20,9 @@ trap cleanup EXIT
 
 # Given
 echo "STEP: Given — create an event with no registrations"
-echo "PREREQ: create event ${EVENT_TITLE}"
+echo "PREREQ: create event only"
 cat > "$EVENT_REQUEST_BODY" <<EOF
-{"title":"${EVENT_TITLE}","description":"Event with no registrations","startDate":"2020-01-01","endDate":"2099-12-31","location":"Quiet Room"}
+{"title":"${EVENT_TITLE}","description":"Event without attendees","startDate":"2020-02-01","endDate":"2099-06-30","location":"Quiet Room"}
 EOF
 echo "REQUEST_HEADERS: Content-Type: application/json"
 echo "REQUEST_BODY:"; cat "$EVENT_REQUEST_BODY"
@@ -38,7 +38,7 @@ EVENT_ID="$(sed -n 's/.*"id":"\([^"]*\)".*/\1/p' "$EVENT_RESPONSE_BODY" | head -
 [ -n "$EVENT_ID" ] || { echo "ASSERTION_FAILED: expected response body to contain non-empty event id"; exit 1; }
 
 # When
-echo "STEP: When — retrieve registrations for the event with no attendees"
+echo "STEP: When — retrieve registrations for the event with zero attendees"
 HTTP_CODE="$(curl -sS -D "$RESPONSE_HEADERS" -o "$RESPONSE_BODY" -w '%{http_code}' \
   "$BASE_URL/api/registrations/${EVENT_ID}")"
 echo "REQUEST_HEADERS: Accept: application/json"
@@ -48,10 +48,10 @@ echo "RESPONSE_HEADERS:"; cat "$RESPONSE_HEADERS"
 echo "RESPONSE_BODY:"; cat "$RESPONSE_BODY"
 
 # Then
-echo "STEP: Then — assert HTTP 200 and empty array"
+echo "STEP: Then — assert HTTP 200 with empty JSON array"
 [ "$HTTP_CODE" = "200" ] || { echo "ASSERTION_FAILED: expected HTTP 200 got ${HTTP_CODE}"; exit 1; }
-BODY_COMPACT="$(tr -d '[:space:]' < "$RESPONSE_BODY")"
-[ "$BODY_COMPACT" = "[]" ] || { echo "ASSERTION_FAILED: expected empty array [] got ${BODY_COMPACT}"; exit 1; }
+BODY_COMPACT="$(tr -d '\n\r ' < "$RESPONSE_BODY")"
+[ "$BODY_COMPACT" = "[]" ] || { echo "ASSERTION_FAILED: expected empty JSON array got ${BODY_COMPACT}"; exit 1; }
 
 # Cleanup
 echo "STEP: Cleanup — no delete API exists; unique test data isolates side effects"

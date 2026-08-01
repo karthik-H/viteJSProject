@@ -1,6 +1,35 @@
 import { test, expect } from "@playwright/test";
 import { ExecutionRecorder } from "../../helpers/execution-recorder.js";
-import { setupAuthenticatedSession } from "../../helpers/mock-api.js";
+
+const AUTH_KEY = "auth";
+
+async function freezeDate(page, isoDate) {
+  const frozenIso = `${isoDate}T12:00:00.000Z`;
+  await page.addInitScript(({ now }) => {
+    const RealDate = Date;
+    class MockDate extends RealDate {
+      constructor(...args) {
+        if (args.length === 0) super(now);
+        else super(...args);
+      }
+      static now() { return new RealDate(now).getTime(); }
+      static parse(value) { return RealDate.parse(value); }
+      static UTC(...args) { return RealDate.UTC(...args); }
+    }
+    Object.setPrototypeOf(MockDate, RealDate);
+    // eslint-disable-next-line no-global-assign
+    Date = MockDate;
+  }, { now: frozenIso });
+}
+
+async function setupAuthenticatedSession(page) {
+  await page.addInitScript((storageKey) => {
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      token: "mock-jwt-token",
+      user: { id: "user_alice001", email: "alice@example.com" }
+    }));
+  }, AUTH_KEY);
+}
 
 test("Registration request is blocked when UI button is disabled due to date rules", async ({ page }, testInfo) => {
   const recorder = new ExecutionRecorder({
@@ -8,91 +37,70 @@ test("Registration request is blocked when UI button is disabled due to date rul
     testTitle: testInfo.title,
   });
 
-  await recorder.record("Freeze browser date to 2024-06-20 before the event registration opens");
-  await page.addInitScript(() => {
-    const fixed = new Date("2024-06-20T12:00:00.000Z");
-    const RealDate = Date;
-    class MockDate extends RealDate {
-      constructor(...args) { super(args.length === 0 ? fixed.toISOString() : ...args); }
-      static now() { return fixed.getTime(); }
-      static parse(value) { return RealDate.parse(value); }
-      static UTC(...args) { return RealDate.UTC(...args); }
-    }
-    window.Date = MockDate;
-  });
-
-  await recorder.record("Seed authenticated session");
+  await freezeDate(page, "2024-06-20");
   await setupAuthenticatedSession(page);
 
-  const event = {
-    id: "event_blocked_window",
-    title: "Blocked Registration Event",
-    description: "Registration is not yet allowed.",
+  const futureEvent = {
+    id: "event_blocked_future",
+    title: "Locked Registration Expo",
+    description: "Should reject bypass attempts",
     startDate: "2024-06-25",
     endDate: "2024-07-05",
-    location: "Main Hall",
+    location: "Auditorium C",
     registrationCount: 0,
   };
 
-  await recorder.record("Mock event, registrations, and backend-style 400 rejection on direct POST");
   await page.route("**/api/events", async (route) => {
-    if (route.request().method() === "GET") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([event]) });
-      return;
-    }
-    await route.continue();
-  });
-  await page.route("**/api/registrations/*", async (route) => {
-    if (route.request().method() === "GET") {
-      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
-      return;
-    }
-    await route.continue();
-  });
-  await page.route("**/api/registrations", async (route) => {
-    if (route.request().method() === "POST") {
-      await route.fulfill({
-        status: 400,
-        contentType: "application/json",
-        body: JSON.stringify({
-          message: "Registration has not opened yet. Registration opens on 2024-06-25.",
-        }),
-      });
-      return;
-    }
-    await route.continue();
+    if (route.request().method() !== "GET") return route.continue();
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([futureEvent]) });
   });
 
-  await recorder.record("Open registration dashboard");
+  await page.route("**/api/registrations/*", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+  });
+
+  await page.route("**/api/registrations", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    return route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        message: "Registration has not opened yet. Registration opens on 2024-06-25."
+      })
+    });
+  });
+
+  recorder.record("Navigate to the home registration dashboard");
   await page.goto("/");
 
-  await recorder.record("Verify normal UI is disabled for registration");
-  await expect(page.getByRole("button", { name: /Confirm Registration/i })).toBeDisabled();
-  await expect(page.getByText("0 Total", { exact: true })).toBeVisible();
+  recorder.record("Verify UI blocks normal registration controls");
+  await expect(page.getByRole("button", { name: "Confirm Registration" })).toBeDisabled();
+  await expect(page.getByText("Registration opens on 2024-06-25.")).toBeVisible();
+  await expect(page.getByText("0 Total")).toBeVisible();
 
-  await recorder.record("Bypass the disabled UI by issuing a direct API request from the browser context");
+  recorder.record("Bypass the disabled UI by issuing a direct API request from the page context");
   const response = await page.evaluate(async () => {
     const res = await fetch("/api/registrations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        eventId: "event_blocked_window",
-        name: "Blocked User",
-        email: "blocked@example.com",
-        phone: "+1 (555) 999-0000",
-      }),
+        eventId: "event_blocked_future",
+        name: "Bypass User",
+        email: "bypass@example.com",
+        phone: "+1 (555) 111-2222"
+      })
     });
     const data = await res.json();
-    return { status: res.status, body: data };
+    return { status: res.status, data };
   });
 
-  await recorder.record("Assert backend rejection is returned and UI state remains unchanged");
+  recorder.record("Verify backend-style rejection and no UI count update");
   expect(response.status).toBe(400);
-  expect(response.body).toEqual({
-    message: "Registration has not opened yet. Registration opens on 2024-06-25.",
-  });
-  await expect(page.getByText("0 Total", { exact: true })).toBeVisible();
-  await expect(page.getByText("Blocked User", { exact: true })).toHaveCount(0);
+  expect(response.data.message).toBe("Registration has not opened yet. Registration opens on 2024-06-25.");
+  await expect(page.getByText("0 Total")).toBeVisible();
+  await expect(page.getByText("No Registered Attendees")).toBeVisible();
+  await expect(page.getByText("Bypass User")).toHaveCount(0);
 
   console.log("CODEVALID_TEST_ASSERTION_OK:registration_attempts_blocked_when_disabled");
   await recorder.save(testInfo);

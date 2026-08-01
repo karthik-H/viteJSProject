@@ -20,6 +20,7 @@ trap cleanup_files EXIT
 
 # Given
 echo "STEP: Given — prepare unique event payload for valid event creation"
+echo "PREREQ: unique event title prepared to keep test self-contained"
 cat > "$CREATE_BODY_FILE" <<EOF
 {
   "title": "$EVENT_TITLE",
@@ -29,7 +30,6 @@ cat > "$CREATE_BODY_FILE" <<EOF
   "location": "$EVENT_LOCATION"
 }
 EOF
-echo "PREREQ: unique event title prepared to keep test self-contained"
 
 # When
 echo "STEP: When — create a new event with valid required fields"
