@@ -82,7 +82,7 @@ TOMORROW="$(date -u -d "$TODAY + 1 day" +%F 2>/dev/null || date -u -v+1d +%F)"
 DAY_AFTER_TOMORROW="$(date -u -d "$TODAY + 2 day" +%F 2>/dev/null || date -u -v+2d +%F)"
 
 # Given
- echo "STEP: Given — create 3 events and at least one registration for dashboard retrieval"
+echo "STEP: Given — create 3 events and at least one registration for dashboard retrieval"
 create_event "$EVENT_ONE_HEADERS" "$EVENT_ONE_BODY" "Tech Conference ${CASE_SUFFIX}" "$TODAY" "$TOMORROW" "Hall A ${CASE_SUFFIX}"
 create_event "$EVENT_TWO_HEADERS" "$EVENT_TWO_BODY" "Workshop Series ${CASE_SUFFIX}" "$YESTERDAY" "$TODAY" "Hall B ${CASE_SUFFIX}"
 create_event "$EVENT_THREE_HEADERS" "$EVENT_THREE_BODY" "Planning Meetup ${CASE_SUFFIX}" "$TOMORROW" "$DAY_AFTER_TOMORROW" "Hall C ${CASE_SUFFIX}"
@@ -97,7 +97,7 @@ EVENT_ID_THREE="$(sed -n 's/.*"id":"\([^"]*\)".*/\1/p' "$EVENT_THREE_BODY" | hea
 create_registration "$REG_HEADERS" "$REG_BODY" "$EVENT_ID_ONE" "Alice ${CASE_SUFFIX}" "alice-${CASE_SUFFIX}@example.com" "+1-555-1001"
 
 # When
- echo "STEP: When — fetch events list from dashboard API"
+echo "STEP: When — fetch events list from dashboard API"
 echo "REQUEST_HEADERS: Accept: application/json"
 echo "REQUEST_BODY:"
 HTTP_CODE="$(curl -sS -D "$RESPONSE_HEADERS" -o "$RESPONSE_BODY" -w '%{http_code}' \
@@ -110,7 +110,7 @@ echo "RESPONSE_BODY:"
 cat "$RESPONSE_BODY"
 
 # Then
- echo "STEP: Then — assert HTTP 200 and event list structure"
+echo "STEP: Then — assert HTTP 200 and event list structure"
 [ "$HTTP_CODE" = "200" ] || { echo "ASSERTION_FAILED: expected HTTP 200 got ${HTTP_CODE}"; exit 1; }
 grep -qi 'content-type: application/json' "$RESPONSE_HEADERS" || { echo "ASSERTION_FAILED: expected JSON content type"; exit 1; }
 grep -q '^\[' "$RESPONSE_BODY" || { echo "ASSERTION_FAILED: expected response body to be a JSON array"; exit 1; }
@@ -123,6 +123,6 @@ grep -F '"registrationCount"' "$RESPONSE_BODY" >/dev/null 2>&1 || { echo "ASSERT
 grep -F '"registrationCount":1' "$RESPONSE_BODY" >/dev/null 2>&1 || { echo "ASSERTION_FAILED: expected registrationCount 1 in response"; exit 1; }
 
 # Cleanup
- echo "STEP: Cleanup — no delete/reset endpoint exists for in-memory events and registrations"
+echo "STEP: Cleanup — no delete/reset endpoint exists for in-memory events and registrations"
 
 echo "CODEVALID_TEST_ASSERTION_OK:get_events_list_success"
